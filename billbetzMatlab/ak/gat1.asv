@@ -1,0 +1,346 @@
+function gat1 (varargin)
+global v vh
+more off
+ %clear all
+switch nargin
+    case 0
+        close all
+        h=openfig(mfilename,'reuse');
+        vh=guihandles(h);
+        v.t1=.001;
+        v.t2=120;
+        v.meanfreq=20;
+        v.p0=0.1;
+        v.pnow=v.p0; v.replot=0;
+        v.taudep=0.05;
+        v.cutoff=v.meanfreq*v.t1; % fraction of timepts with response
+        v.rms=99999999; v.rmsmin=v.rms;
+        v.histo=1; v.ctr=1;
+        v.nruns=10;
+        v.j10=0;
+        v.noisefac=0.1;
+        v.cd=[]; 
+        v.imax=5000;
+        v.p0=0.1;
+        v.dpfac=0.02;
+        v.taudep=1;
+        v.taufac=0.2;
+        % imax, p0, dpfac, taudep, taufac - low, start, high for each
+        v.scanvars=[500 5000 10000 .02 .1 .8 0 .02 .2 .1 .1 5 .02 .05 .5 1]';
+        v.bkg=get(vh.hfig,'color');
+
+        v.multiobj=0; 
+        % calculate dummy observed data
+        v.obs=[0:v.t1:v.t2-v.t1]'; % time
+        b=rand(size(v.obs,1),1);
+        v.obs(b>v.cutoff)=[];
+  
+        c0=diff(v.obs(:,1));
+        c0=[0; c0];
+        c=1-exp(-c0./v.taudep); % fractional recovery
+        d=exp(-c0./v.taufac);
+        e=exp(pc0./v.tauendo);
+        v.expdep=c; v.expfac=d; v.expendo=e;
+        F0=0;
+        inow=v.imax; pnow=v.p0;
+        for j=1:size(v.obs,1)
+            dfi=v.imax-inow;
+            inow=round(inow+dfi*c(j));
+            dfp=pnow-v.p0;
+            pnow=pnow+dfp*d(j);
+            m=round(inow*pnow);
+            inow=min(v.imax,max(0,inow-m));
+            pnow=max(0,min(1,pnow+v.dpfac));
+            v.obs(j,2)=m;
+        end
+
+        %   try; load('ak1vars.mat'); catch; end
+        setappdata(vh.hfig,'v',v)
+        eval([mfilename ' setvals'])
+        eval([mfilename ' setup_ak1'])
+        % set (vh.axes1,'xlim',[0 v.t2])
+
+    case 1
+        switch varargin{1}
+              case 'loadit'
+                if isempty(v.cd); cd([matlabroot '\work\data\']); end
+                [fname,pname]=uigetfile('*.txt')
+                %  load([pname fname]); % for mat files
+                v.obs=dlmread([pname fname]); % for .txt files
+                v.rmsmin=99999999;
+                eval([mfilename ' setup_ak1'])
+            
+            case 'vars'
+                eval([mfilename ' getvals'])
+                prompt={'Imax' 'p0' 'dp (facilitation)' 'tau (recovery from depression)',...
+                    'tau (recovery from facilitation)' 'tau(endocytosis)'};
+                title='variables'; lineno=1;
+                def={num2str(v.imax) num2str(v.p0) num2str(v.dpfac),...
+                    num2str(v.taudep) num2str(v.taufac) num2str(v.tauendo)};
+                %v.scanvars;
+                inp=inputdlg(prompt,title,lineno,def);
+                v.imax=str2num(inp{1});
+                v.p0=str2num(inp{2});
+                v.dpfac=str2num(inp{3});
+                v.taudep=str2num(inp{4});
+                v.taufac=str2num(inp{5});
+                v.tauendo=str2num(inp{6});
+                %  v.nruns=str2num(inp{6});
+                %  v.noisefac=str2num(inp{7});
+                eval([mfilename ' setvals'])
+                eval([mfilename ' setup_ak1'])
+
+            case 'getvals'
+                v.imax=round(get(vh.imax_slider,'value'));
+                v.p0=get(vh.p0_slider,'value');
+                v.dpfac=get(vh.dpfac_slider,'value');
+                v.taudep=get(vh.taudep_slider,'value');
+                v.taufac=get(vh.taufac_slider,'value');
+                v.tauendo=get(vh.tauendo_slider,'value');
+                
+                eval([mfilename ' setvals'])
+                eval([mfilename ' setup_ak1'])
+                %  eval([mfilename ' calc'])
+
+            case 'setvals'
+                v.scanit=0;
+                save('ak1vars.mat','v');
+                set(vh.imax_txt,'string',['Imax= ' num2str(v.imax)])
+                set(vh.p0_txt,'string',['p0= ' num2str(v.p0)])
+                set(vh.dpfac_txt,'string',['dp (facil)= ' num2str(v.dpfac)])
+                set(vh.taudep_txt,'string',['tau (depn rec)= ' num2str(v.taudep)])
+                set(vh.taufac_txt,'string',['tau (facil rec)= ' num2str(v.taufac)])
+                set(vh.tauendo_txt,'string',['tau (endo)= ' num2str(v.tauendo)])
+                
+                set(vh.imax_slider,'value',v.imax)
+                set(vh.p0_slider,'value',v.p0)
+                set(vh.dpfac_slider,'value',v.dpfac)
+                set(vh.taudep_slider,'value',v.taudep)
+                set(vh.taufac_slider,'value',v.taufac)
+                set(vh.tauendo_slider,'value',v.tauendo)
+                
+            case 'reset'
+                v.scanit=0;
+                eval(mfilename)
+
+            case 'loadrmsmin'
+                v.scanit=0;
+                load('ak1vars_rmsmin.mat')
+                eval([mfilename ' setup_ak1'])
+
+            case 'kbd'
+                keyboard
+                if v.scanit;
+                    v.scanrms=sortrows(v.scanrms,1);
+                    dlmwrite(['junk.txt'],[v.scanrms],'\t')
+                    edit ('junk.txt')
+                    v.scanit=0;
+                    disp('Type dbquit, press ENTER')
+                    eval([mfilename ' setvals'])
+                    eval([mfilename ' setup_ak1'])
+                end
+
+            case 'optim'
+
+                optimmethod=get(gco,'tag');
+                set(gco,'backgroundcolor',[1 0 0])
+                v.multiobj=0; 
+                v.replot=0; % replot each time new rmsmin
+                v.scanvars(2)=v.imax; v.scanvars(5)=v.p0;
+                v.scanvars(8)=v.dpfac; v.scanvars(11)=v.taudep; v.scanvars(14)=v.taufac;
+
+                v.rmsmin=1e12;
+                v.scanit=0; v.ctr=0;
+                prompt={'Imax: min' 'Imax: Initial value' 'Imax: max',...
+                    'p0: min', 'p0: Initial vaue' 'p0: max',...
+                    'dp (facilitation): min' 'dp (facilitation): Initial vaue' 'dp (facilitation): max',...
+                    'tau (depression recovery): min' 'tau (depression recovery): Initial vaue' 'tau (depression recovery): max',...
+                    'tau (facilitation decay): min' 'tau (facilitation deay) Initial vaue',...
+                    'tau (facilitation decay): max'}; %
+                title='scan variables'; lineno=1;
+                def={};
+                for j=1:size(v.scanvars,1);
+                    def=[def {num2str(v.scanvars(j,1))}];
+                end
+                inp=inputdlg(prompt,title,lineno,def);
+                if isempty(inp); return; end
+                drawnow
+                for j=1:size(inp,1); x(j,1)=str2num(inp{j}); end
+                v.scanvars=x;
+
+                lb=[x(1) x(4) x(7) x(10) x(13)];
+                ub=[x(3) x(6) x(9) x(12) x(15)];
+                x0=[x(2) x(5) x(8) x(11) x(14)];
+                nvars=5;
+                switch optimmethod
+                    case 'optim_ps' % PatternSearch'
+                        options=psoptimset;
+                        %  options.TolMesh=1e-8;
+                        options.MaxIter=1e4;
+                        %         options.TolX=1e-8;
+                        %  options.Display='iter'; % 'final/off/
+                        %  options.CompletePoll='on';
+                        %        options.MeshAccelerator='on';
+                        %       options.Cache='on';
+                        disp('Using Pattern Search method...')
+
+                        [x fval] = patternsearch(@opt, x0,[],[],[],[],lb,ub,[],options);
+
+                    case 'optim_ga' % GeneticAlgorithm'
+                        options=gaoptimset;
+                        disp('Using Genetic Algoritm method...')
+
+                        [x fval] = ga(@opt,nvars,[],[],[],[],lb,ub,[],options);
+
+                    case 'optim_gamultiobj'
+                        v.multiobj=1;
+                        options=gaoptimset;
+                        disp('Using Genetic Algoritm MultiObjectives method...')
+
+                        [X fval]= gamultiobj(@opt,nvars,[],[],[],[],lb,ub,options);
+                        v.X=X; v.fval=fval;
+                        str=['results in v.X and v.fval' char(10),...
+                            'v.fval=pareto front - plot col 1 vs col 2' char(10),...
+                            'v.X contains the values of all 5 vars at each pareto x,y point'];
+                        disp(str)
+                        a=fval(:,1)+fval(:,2); 
+                        b=find(a==min(a(:)));
+                        x=X(b(1),:);
+                    case 'optim_sa' % SimulatedAnnealing'
+                        options=saoptimset;
+
+                        disp('Using Simulated Annealing method...')
+                        [x fval] = simulannealbnd(@opt,x0,lb,ub,options);
+
+                end % switch optimmethod
+                disp('Done')
+                set(findobj('tag',optimmethod),'backgroundcolor',v.bkg)
+               
+                v.imax=x(1); v.p0=x(2); v.dpfac=x(3); v.taudep=x(4); v.taufac=x(5);
+                
+                eval([mfilename ' setvals'])
+                eval([mfilename ' setup_ak1'])
+                eval([mfilename ' calc'])
+
+                %   case 'saveit'
+                %   [fname,pname]=uiputfile;
+                %  save([pname fname],'v');
+                disp (v.ctr)
+          
+
+            case 'calc'
+                v.dat=zeros(size(v.obs,1),1);
+                c0=diff(v.obs(:,1));
+                c0=[0; c0];
+                c=1-exp(-c0./v.taudep); % fractional recovery
+                d=exp(-c0./v.taufac);
+                v.expdep=c; v.expfac=d;
+                inow=v.imax; pnow=v.p0;
+                for j=1:size(v.obs,1)
+                    dfi=v.imax-inow;
+                    inow=round(inow+dfi*c(j));
+                    dfp=pnow-v.p0;
+                    pnow=pnow+dfp*d(j);
+                    m=round(inow*pnow);
+                    inow=min(v.imax,max(0,inow-m));
+                    pnow=max(0,min(1,pnow+v.dpfac));
+                    v.dat(j,2)=m;
+                end
+                ddat=v.obs(:,2)-v.dat(:,2);
+                v.rms=sqrt(sum(ddat.^2));
+                if v.rms<v.rmsmin
+                    v.rmsmin=v.rms;  save('ak1vars_rmsmin.mat','v');
+                end % if rms<v.rmsmin
+                str=['rms= ' num2str(round(v.rms)) char(10),...
+                    '. Min rms = ' num2str(round(v.rmsmin))];
+                set(vh.results,'string',str)
+                axes(vh.axes2)
+                mx=max(max(v.obs(:,2)),max(v.dat(:,2)));
+                set(gca,'xlim',[0 mx],'ylim', [0 mx]);
+                vh.line0=line('xdata',[0 mx],'ydata',[0 mx]);
+                vh.line2=line('xdata',v.obs(:,2),'ydata',v.dat(:,2),'linestyle','none','marker','.');
+                axes(vh.axes1)
+                vh.line01=line('xdata',v.obs(:,1),'ydata',v.dat(:,2),'color',[0 0 0],...
+                    'linestyle','none','marker','.');
+                vh.line0= line('xdata',v.obs(:,1),'ydata',v.obs(:,2),'color',[1 .6 .6],...
+                    'linestyle','none','marker','.');
+                axes(vh.axes3)
+                dobs=diff(v.obs(:,1)); dobs=[0; dobs];
+                vh.line4=line('xdata',dobs,'ydata',v.obs(:,2),'linestyle','none','marker','.');
+                axes(vh.axes1)
+
+            case 'setup_ak1'
+                v.pnow=v.p0;
+                v.obs(:,1)=v.obs(:,1)-v.obs(1,1);
+                v.t2=v.obs(end,1);
+                axes(vh.axes1)
+                delete(findobj(vh.hfig,'type','line'))
+                if ~v.scanit; set(vh.results,'string',''); end
+                axes(vh.axes1)
+                set(gca,'ylimmode','auto','xlim',[0 v.t2]);
+                grid on
+                eval([mfilename ' calc'])
+
+        end % switch varargin
+
+end % switch nargin
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function fval=opt(x);
+global v vh
+v.taufac=x(5); v.taudep=x(4); v.dpfac=x(3);
+v.p0=x(2); v.imax=x(1);
+v.dat=zeros(size(v.obs,1),1); % times of events
+c0=diff(v.obs(:,1));
+c0=[0; c0];  % dt
+c=1-exp(-c0./v.taudep); % fractional recovery, depn
+d=exp(-c0./v.taufac); % fractional recovery, facil
+inow=x(1); pnow=x(2);
+for j=1:size(v.obs,1)
+    dfi=v.imax-inow;
+    inow=round(inow+dfi*c(j));
+    dfp=pnow-v.p0;
+    pnow=pnow+dfp*d(j);
+    m=round(inow*pnow);
+    inow=min(v.imax,max(0,inow-m));
+    pnow=max(0,min(1,pnow+v.dpfac));
+    v.dat(j,2)=m;
+end
+ddat=v.obs(:,2)-v.dat(:,2);
+v.rms=sqrt(sum(ddat.^2));
+%v.rms=-v.rms; %%%%%%%%%%%%%%%%%%%%%
+fval=v.rms;
+
+if v.multiobj
+    fval2=max(ddat);
+    fval=[fval; fval2];
+    v.rms=(abs(fval(1))+abs(fval(2)));
+end
+
+v.ctr=v.ctr+1;
+%disp([v.ctr f x]); drawnow
+%keyboard
+if v.rms<v.rmsmin;
+    v.rmsmin=v.rms;
+    %  eval([mfilename ' calc'])
+    str=['. Min rms = ' num2str(round(v.rmsmin))];
+    set(vh.results,'string',str)
+
+    if v.replot
+        eval([mfilename ' setvals'])
+        eval([mfilename ' setup_ak1'])
+        eval([mfilename ' calc'])
+    end
+    drawnow
+end
+
+
+
+
+
+
+
+
+
+
+
